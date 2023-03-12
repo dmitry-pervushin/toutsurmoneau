@@ -1,0 +1,11 @@
+{
+  "codeowners": ["@dmitry-pervushin"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/dmitry-pervushin/pysuez1-ha",
+  "domain": "toutsurmoneau",
+  "iot_class": "cloud_polling",
+  "name": "ToutSurMonEau.Fr",
+  "requirements": ["aiohttp==3.8.4"],
+  "version": "0.1.0"
+}
