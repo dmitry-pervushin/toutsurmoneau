@@ -26,6 +26,7 @@ import asyncio
 import datetime
 import getpass
 import logging
+import pytz
 import re
 
 import aiohttp
@@ -196,7 +197,9 @@ class SuezClient():
 
         await self._get_cookie()
 
-        now = datetime.datetime.now()
+        # get the current time in France: data on the website is updated in this timezone
+        now = datetime.datetime.now(pytz.timezone('Europe/Paris'))
+
         yesterday = now - datetime.timedelta(days=1)
         first_this_month = now.replace(day=1)
         prev_month = first_this_month - datetime.timedelta(days=1)
