@@ -140,7 +140,8 @@ class SuezSensor(CoordinatorEntity, SensorEntity):
         self._attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
         self._attr_unit_of_measurement = UnitOfVolume.CUBIC_METERS
         self._attr_attribution = entry.attribution
-        self._attr_native_value = entry.value
+        if entry.valid:
+            self._attr_native_value = entry.value
         self._attr_state_class = entry.state_class
         self._attr_icon = "mdi:water-pump"
         self._attr_unique_id = f"suez_{entry.counter_id}_{idx}"
@@ -148,7 +149,7 @@ class SuezSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_info = {
             "identifiers": {(DOMAIN, f"suez_{self._counter_id}")},
             "name": "SUEZ client",
-            "sw_version": "",
+            "sw_version": "None",
             "model": "",
             "manufacturer": "SUEZ",
         }
