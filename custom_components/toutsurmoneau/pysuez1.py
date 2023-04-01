@@ -213,7 +213,11 @@ class SuezClient():
         first_this_month = now.replace(day=1)
         prev_month = first_this_month - datetime.timedelta(days=1)
 
-        today_json = await self._fetch_data_url(f"{now.year}/{now.month}/{self._counter_id}")
+        try:
+            today_json = await self._fetch_data_url(f"{now.year}/{now.month}/{self._counter_id}")
+        except SuezError as exc:
+            today_json = {}
+            self._logger.warning(f"Fetching todaty's data: {exc}")
         if yesterday.month != now.month:
             yesterday_json = await self._fetch_data_url(f"{yesterday.year}/{yesterday.month}/{self._counter_id}")
         else:
