@@ -1,6 +1,7 @@
 from collections import OrderedDict
 from dataclasses import dataclass
 import datetime
+import pytz
 import logging
 
 from homeassistant import config_entries, core
@@ -42,7 +43,7 @@ async def async_setup_entry(
 class SuezSensorData:
     name: str
     value: int
-    counter_id: int
+    unique_id: int
     valid: bool
     state_class: str
     attribution: str
@@ -65,7 +66,7 @@ class SuezCoordinator(DataUpdateCoordinator):
     to all the sensors that are created
     """
 
-    POLL_DELAY_HOURS = 4
+    POLL_DELAY_HOURS = 1
 
     def __init__(self, hass, info):
         """
@@ -77,13 +78,18 @@ class SuezCoordinator(DataUpdateCoordinator):
             name="suez_coordinator",
             update_interval=datetime.timedelta(hours=self.POLL_DELAY_HOURS)
         )
-        self.counter_id = info['counter_id']
+        self.last_update = None
+        self.unique_id = info['counter_id']
         self.suez = SuezClient(
             username=info['username'],
             password=info['password'],
             counter_id=info['counter_id'],
             provider=info['provider'],
             logger=_LOGGER)
+        self.sensors = self._sensors_list(False)
+        # skip first update to speed up things
+        # the data will be retrieved on next poll
+        self._skip_update = True
 
     def _suez_value(self, suez, desc):
         """
@@ -93,32 +99,68 @@ class SuezCoordinator(DataUpdateCoordinator):
         try:
             value = getattr(suez, desc['attr'])
             index = desc['index']
-            return value if index is None else value[index]
+            return value if index is None or value is None else value[index]
         except Exception as exc:
-            _LOGGER.error(f"When getting {desc['attr']}, exception happened: {exc}; returning None")
+            _LOGGER.error(f"On {desc['attr']}, exception happened: {exc}; returning None")
             return None
+
+    def _sensors_list(self, validity):
+        """
+        returns list of sensor data (data might be invalid depending on validity parameter)
+        """
+        return [SuezSensorData(
+            name=key,
+            value=self._suez_value(self.suez, desc),
+            unique_id=self.unique_id,
+            valid=validity,
+            state_class=desc['state_class'],
+            attribution=self.suez.attribution
+        ) for (key, desc) in suez_attributes_map.items()]
+
+    def _now(self):
+        return datetime.datetime.now(pytz.timezone('Europe/Paris'))
+
+    def _needs_update(self):
+        """
+        boolean: do we need to pull the data?
+        """
+        skip_update = self._skip_update
+        self._skip_update = False
+        if self.last_update is None:
+            return not skip_update
+        if skip_update:
+            return False
+        now = self._now()
+        return now.day != self.last_update.day
 
     async def _async_update_data(self):
         """
         Get updates from Suez, and then return updated values for sensors
         """
-        _LOGGER.debug("Update!")
-        valid = False
+        _LOGGER.debug("Update tick!")
         try:
-            await self.suez.update_async()
-            valid = self.suez.uptodate
-        except SuezError as exc:
-            _LOGGER.error(f"When updating, exception happened: {exc}")
-        sensors = [SuezSensorData(
-            name=key,
-            value=self._suez_value(self.suez, desc),
-            counter_id=self.counter_id,
-            valid=valid,
-            state_class=desc['state_class'],
-            attribution=self.suez.attribution
-        ) for (key, desc) in suez_attributes_map.items()]
-        return sensors
+            if not self._needs_update():
+                raise SuezError("needs_update returned False")
 
+            _LOGGER.debug("Update tick - fetching data")
+
+            await self.suez.update_async()
+
+            sensors = self._sensors_list(self.suez.uptodate)
+            if not self.suez.uptodate:
+                raise SuezError(f"got some bad data, will fetch later")
+
+            self.last_update = self._now()
+            self.sensors = sensors
+            _LOGGER.debug(f"Update successful, next update is for tomorrow")
+
+        except SuezError as exc:
+            _LOGGER.error(f"{exc} -- will not update")
+
+        except Exception as exc:
+            raise
+
+        return self.sensors
 
 class SuezSensor(CoordinatorEntity, SensorEntity):
 
@@ -133,8 +175,8 @@ class SuezSensor(CoordinatorEntity, SensorEntity):
         Initialize the sensor
         """
         super().__init__(coordinator, context=idx)
-        _LOGGER.debug(f'Initializing with {idx=}, {entry=}')
-        self._counter_id = entry.counter_id
+        _LOGGER.debug(f'{idx=}, {entry=}')
+        self._unique_id = entry.unique_id
         self._idx = idx
         self._attr_device_class = SensorDeviceClass.WATER
         self._attr_native_unit_of_measurement = UnitOfVolume.CUBIC_METERS
@@ -144,10 +186,10 @@ class SuezSensor(CoordinatorEntity, SensorEntity):
             self._attr_native_value = entry.value
         self._attr_state_class = entry.state_class
         self._attr_icon = "mdi:water-pump"
-        self._attr_unique_id = f"suez_{entry.counter_id}_{idx}"
-        self._attr_name = f'suez_{entry.counter_id}_{entry.name}'
+        self._attr_unique_id = f"suez_{entry.unique_id}_{idx}"
+        self._attr_name = f'suez_{entry.unique_id}_{entry.name}'
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, f"suez_{self._counter_id}")},
+            "identifiers": {(DOMAIN, f"suez_{self._unique_id}")},
             "name": "SUEZ client",
             "sw_version": "None",
             "model": "",
