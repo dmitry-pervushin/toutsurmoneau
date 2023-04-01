@@ -46,6 +46,7 @@ class SuezClient():
     """
 
     API_ENDPOINT_LOGIN = '/mon-compte-en-ligne/je-me-connecte'
+    API_ENDPOINT_CONSUMPTION = '/mon-compte-en-ligne/historique-de-consommation-tr'
     API_ENDPOINT_DATA = '/mon-compte-en-ligne/statJData'
     API_ENDPOINT_HISTORY = '/mon-compte-en-ligne/statMData'
     _providers = {
@@ -112,21 +113,10 @@ class SuezClient():
         """
         Get the CSRF token
         """
-        headers = {
-            'Accept': "application/json, text/javascript, */*; q=0.01",
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept-Language': 'fr,fr-FR;q=0.8,en;q=0.6',
-            'User-Agent': 'curl/7.54.0',
-            'Connection': 'keep-alive',
-            'Cookie': ''
-        }
+        response = await self._fetch_url('', self.API_ENDPOINT_LOGIN, headers={})
+        self._headers['Cookie'] = "; ".join([f"{key}={value}" for (key, value) in response.cookies.items()])
 
-        response = await self._session.get(self._url(self.API_ENDPOINT_LOGIN),
-                                           headers=headers, timeout=self._timeout)
-
-        headers['Cookie'] = "; ".join([f"{key}={value}" for (key, value) in response.cookies.items()])
-        self._headers = headers
-        decoded_content = (await response.read()).decode('utf-8')
+        decoded_content = await response.text(encoding='utf-8')
         self._token = self._get_token_1(decoded_content) or self._get_token_2(decoded_content)
         if self._token is None:
             raise SuezError("Can't get token.")
@@ -162,22 +152,38 @@ class SuezClient():
         self._headers['Cookie'] = f"eZSESSID={response.cookies['eZSESSID']}"
         return True
 
+    async def _fetch_url(self, url_tail, endpoint, headers=None):
+        url = self._url(endpoint)
+        if url_tail:
+             url = url + "/" + url_tail
+        get_headers=self._headers if headers is None else headers
+        self._logger.debug(f"Fetching {url=}")
+        return await self._session.get(url, timeout=self._timeout, headers=get_headers)
+
     async def _fetch_data_url(self, url_tail, endpoint=None):
         """
         Fetch the data from base_url/endpoint/url_tail using GET
 
         if endpoint is NULL, self.API_ENDPOINT_DATA is used
         """
-        if endpoint is None:
-            endpoint = self.API_ENDPOINT_DATA
-        url = self._url(endpoint) + "/" + url_tail
-        self._logger.debug(f"Fetching {url=}")
-        data = await self._session.get(url, headers=self._headers)
+        ep = endpoint
+        if ep is None:
+            ep = self.API_ENDPOINT_DATA
+        data = await self._fetch_url(url_tail, ep)
         json = await data.json()
         self._logger.debug(f"Loaded {json=}")
         if len(json) and str(json[0]) == 'ERR':
             raise SuezError(str(json[1]) if len(json) > 1 else "Unknown error")
         return json
+
+    async def _fetch_consumption(self):
+        #
+        # the counter_id can be found in some URLs on the page, like:
+        #
+        pattern = re.compile('exporter-consommation/month/([0-9]+)')
+        data = await self._fetch_url('', self.API_ENDPOINT_CONSUMPTION)
+        counter_id = pattern.search(await data.text(encoding='utf-8'))
+        return counter_id.group(1)
 
     def ensure_type(self, candidate, typelist):
         """
@@ -196,6 +202,9 @@ class SuezClient():
         self.uptodate = False
 
         await self._get_cookie()
+
+        if self._counter_id is None:
+            self._counter_id = await self._fetch_consumption()
 
         # get the current time in France: data on the website is updated in this timezone
         now = datetime.datetime.now(pytz.timezone('Europe/Paris'))
@@ -276,6 +285,7 @@ class SuezClient():
         except OSError as exc:
             raise SuezError("Can not submit login form.") from exc
         self._logger.debug(f"Got cookies {response.cookies}")
+
         return 'eZSESSID' in response.cookies
 
     async def update_async(self):
@@ -298,7 +308,9 @@ class SuezClient():
 
 
 def __main():
-    """Main function"""
+    """
+    Main function
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument('-u', '--username',
                         default=None,
@@ -312,6 +324,10 @@ def __main():
     parser.add_argument('-P', '--provider',
                         default=None,
                         help='Provider name')
+    parser.add_argument('-v', '--verbose',
+                        default=0, action='count',
+                        help='Verbosity level')
+
     parser.add_argument('command',
                         choices=['show', 'providers', 'check'],
                         default='show',
@@ -321,14 +337,17 @@ def __main():
     args = parser.parse_args()
     need_args = args.command not in ['providers']
 
-    if args.counter_id is None and need_args:
-        args.counter_id = input('COUNTER_ID: ')
     if args.username is None and need_args:
         args.username = input('Username  : ')
     if args.password is None and need_args:
         args.password = getpass.getpass('Password  : ')
 
-    suez = SuezClient(args.username, args.password, args.counter_id, args.provider)
+    logger = None
+    if args.verbose > 0:
+        logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%H:%M:%S', level = max(40 - args.verbose  * 10, 0))
+        logger = logging.getLogger(__name__)
+
+    suez = SuezClient(args.username, args.password, args.counter_id, args.provider, logger=logger)
 
     if args.command == 'providers':
         print(f'Available providers are: {suez.providers()}')
