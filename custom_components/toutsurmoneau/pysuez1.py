@@ -102,7 +102,7 @@ class SuezClient():
         return result.group(1)
 
     def _get_token_2(self, content):
-        phrase = re.compile('csrfToken\\\\u0022\\\\u003A\\\\u0022(.*)\\\\u0022,\\\\u0022')
+        phrase = re.compile('csrfToken\\\\u0022\\\\u003A\\\\u0022([^,]+)\\\\u0022,\\\\u0022')
         result = phrase.search(content)
         if result is None:
             self._logger.info("cannot get token using method 2")
