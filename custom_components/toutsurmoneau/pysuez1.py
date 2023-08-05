@@ -67,7 +67,6 @@ class SuezClient():
         self._password = password
         self._counter_id = counter_id
         self._token = ''
-        self._headers = {}
         self._session = None
         self._timeout = timeout
         self._provider = provider or 'toutsurmoneau'
@@ -84,7 +83,7 @@ class SuezClient():
         self.last_year_overall = None
         self.highest_monthly = None
 
-    def _url(self, endpoint):
+    def _url(self, endpoint = ''):
         """ Use custom base URL if needed """
         return self._providers[self._provider] + endpoint
 
@@ -97,30 +96,37 @@ class SuezClient():
         phrase = re.compile('csrf_token(.*)')
         result = phrase.search(content)
         if result is None:
-            self._logger.info("cannot get token using method 1")
+            self._logger.info("cannot get token using method I")
             return None
+        self._logger.info("Looks like I get token use method I")
         return result.group(1)
 
     def _get_token_2(self, content):
         phrase = re.compile('csrfToken\\\\u0022\\\\u003A\\\\u0022([^,]+)\\\\u0022,\\\\u0022')
         result = phrase.search(content)
         if result is None:
-            self._logger.info("cannot get token using method 2")
+            self._logger.info("cannot get token using method II")
             return None
+        self._logger.info("Looks like I get token use method II")
         return result.group(1).encode().decode('unicode_escape')
+
+    def _cookies(self):
+        cookies = self._session.cookie_jar.filter_cookies(self._url())
+        self._logger.debug(f"{cookies=}")
+        return cookies
 
     async def _get_token(self):
         """
         Get the CSRF token
         """
-        response = await self._fetch_url('', self.API_ENDPOINT_LOGIN, headers={})
-        self._headers['Cookie'] = "; ".join([f"{key}={value}" for (key, value) in response.cookies.items()])
+        response = await self._fetch_url('', self.API_ENDPOINT_LOGIN)
 
         decoded_content = await response.text(encoding='utf-8')
         self._token = self._get_token_1(decoded_content) or self._get_token_2(decoded_content)
         if self._token is None:
             raise SuezError("Can't get token.")
 
+        self._logger.debug(f"Found token = {self._token}")
         return {
             '_username': self._username,
             '_password': self._password,
@@ -131,34 +137,39 @@ class SuezClient():
             'tsme_user_login[_password]': self._password
         }
 
+    def _rq(self, url, data = None, method = None, **kwargs):
+        verb = method
+        if data is not None:
+            verb = 'post'
+        if verb is None:
+            verb = 'get'
+        return self._session.request(verb, url, data=data, **kwargs)
+
     async def _get_cookie(self):
         """
         Connect and get the cookie
         """
         data = await self._get_token()
         try:
-            response = await self._session.post(self._url(self.API_ENDPOINT_LOGIN),
-                                                headers=self._headers,
-                                                data=data,
-                                                allow_redirects=False,
-                                                timeout=self._timeout)
+            async with self._rq(self._url(self.API_ENDPOINT_LOGIN),
+                                data=data,
+                                allow_redirects=False,
+                                timeout=self._timeout) as rq:
+               await rq.text(encoding='utf-8')
         except OSError as exc:
             raise SuezError("Can not submit login form.") from exc
 
-        if not 'eZSESSID' in response.cookies.keys():
+        if not 'eZSESSID' in self._cookies():
             raise SuezError("Login error: Please check your username/password.")
 
-        self._logger.debug(f"Got session id {response.cookies['eZSESSID']}")
-        self._headers['Cookie'] = f"eZSESSID={response.cookies['eZSESSID']}"
         return True
 
-    async def _fetch_url(self, url_tail, endpoint, headers=None):
+    def _fetch_url(self, url_tail, endpoint):
         url = self._url(endpoint)
         if url_tail:
              url = url + "/" + url_tail
-        get_headers=self._headers if headers is None else headers
-        self._logger.debug(f"Fetching {url=}")
-        return await self._session.get(url, timeout=self._timeout, headers=get_headers)
+        self._logger.info(f"Fetching {url=}")
+        return self._rq(url, timeout=self._timeout)
 
     async def _fetch_data_url(self, url_tail, endpoint=None):
         """
@@ -282,7 +293,6 @@ class SuezClient():
         data = await self._get_token()
         try:
             response = await self._session.post(self._url(self.API_ENDPOINT_LOGIN),
-                                                headers=self._headers,
                                                 data=data,
                                                 allow_redirects=False,
                                                 timeout=self._timeout)
@@ -294,12 +304,12 @@ class SuezClient():
 
     async def update_async(self):
         """Asynchronous update"""
-        async with aiohttp.ClientSession() as self._session:
+        async with self.session() as self._session:
             return await self._fetch_data()
 
     async def check_credentials_async(self):
         """Asynchronous check_credential"""
-        async with aiohttp.ClientSession() as self._session:
+        async with self.session() as self._session:
             return await self._check_credentials()
 
     def update(self):
@@ -309,6 +319,16 @@ class SuezClient():
     def check_credentials(self):
         """Asynchronous check_credential"""
         return asyncio.run(self.check_credentials_async())
+
+    async def _trace(self, session, context, params):
+        self._logger.debug(f'{params}')
+
+    def session(self):
+        trace = aiohttp.TraceConfig()
+        trace.on_request_start.append(self._trace)
+        trace.on_request_end.append(self._trace)
+        trace.on_request_exception.append(self._trace)
+        return aiohttp.ClientSession(trace_configs = [trace])
 
 
 def __main():
