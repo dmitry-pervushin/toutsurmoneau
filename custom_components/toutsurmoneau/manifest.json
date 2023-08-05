@@ -6,6 +6,6 @@
   "domain": "toutsurmoneau",
   "iot_class": "cloud_polling",
   "name": "ToutSurMonEau.Fr",
-  "requirements": ["aiohttp==3.8.4"],
-  "version": "0.1.1"
+  "requirements": ["aiohttp"],
+  "version": "0.1.2"
 }
