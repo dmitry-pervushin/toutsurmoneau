@@ -149,14 +149,14 @@ class SuezCoordinator(DataUpdateCoordinator):
 
             sensors = self._sensors_list(self.suez.uptodate)
             if not self.suez.uptodate:
-                raise SuezError(f"got some bad data, will fetch later")
+                raise SuezError(f"not updated -- will fetch later")
 
             self.last_update = self._now()
             self.sensors = sensors
             _LOGGER.debug(f"Update successful, next update is for tomorrow")
 
         except SuezError as exc:
-            _LOGGER.error(f"{exc} -- will not update")
+            _LOGGER.info(f"{exc} -- will not update")
 
         except Exception as exc:
             raise
