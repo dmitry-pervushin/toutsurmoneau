@@ -52,6 +52,7 @@ class SuezSensorData:
 suez_attributes_map = OrderedDict([
     ('yesterday_delta'      , {'attr': 'last', 'index': 0, 'state_class': None}),
     ('yesterday_total'      , {'attr': 'last', 'index': 1, 'state_class' : SensorStateClass.TOTAL}),
+    ('last_known'           , {'attr': 'last_known', 'index': None, 'state_class' : SensorStateClass.TOTAL}),
     ('last_year_delta'      , {'attr': 'last_year_overall', 'index': None, 'state_class': None}),
     ('this_year_delta'      , {'attr': 'this_year_overall', 'index': None, 'state_class': None}),
     ('highest_monthly_delta', {'attr': 'highest_monthly', 'index': None, 'state_class': None}),

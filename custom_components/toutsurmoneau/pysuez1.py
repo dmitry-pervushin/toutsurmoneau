@@ -204,6 +204,24 @@ class SuezClient():
             if not isinstance(value, expected_type):
                 raise SuezError(f"{value} was expected to be {expected_type}")
 
+    async def _fetch_last_known(self, today):
+        now = today
+        _year_month = ""
+        last_known_good = None
+        candidate = None
+        count = 0
+        while (last_known_good is None or last_known_good < 0.0001) and count < 60:
+            if _year_month != f"{now.year}/{now.month}":
+                 _year_month = f"{now.year}/{now.month}"
+                 candidate = await self._fetch_data_url(f"{_year_month}/{self._counter_id}")
+            if candidate is not None:
+                 date_txt, delta, total = candidate[now.day - 1]
+                 last_known_good = total
+                 self.ensure_type([total], [(int, float)])
+            now = now - datetime.timedelta(days=1)
+            count = count + 1
+        return last_known_good
+
     async def _fetch_data(self):
         """
         Fetch latest data from Suez
@@ -218,7 +236,12 @@ class SuezClient():
             self._counter_id = await self._fetch_consumption()
 
         # get the current time in France: data on the website is updated in this timezone
+
         now = datetime.datetime.now(pytz.timezone('Europe/Paris'))
+        try:
+            self.last_known = await self._fetch_last_known(now)
+        except SuezError as exc:
+            self.last_known = 0
 
         yesterday = now - datetime.timedelta(days=1)
         first_this_month = now.replace(day=1)
@@ -386,6 +409,7 @@ def __main():
         print("Getting updates....")
         suez.update()
         if suez.success:
+            print(f'{suez.last_known=}')
             print(f'{suez.last=}')
             print(f'{suez.this_month=}')
             print(f'{suez.prev_month=}')
