@@ -87,7 +87,7 @@ class SuezCoordinator(DataUpdateCoordinator):
             counter_id=info['counter_id'],
             provider=info['provider'],
             logger=_LOGGER)
-        self.sensors = self._sensors_list(False)
+        self.sensors = self._sensors_list(False, False)
         # skip first update to speed up things
         # the data will be retrieved on next poll
         self._skip_update = True
@@ -105,7 +105,7 @@ class SuezCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"On {desc['attr']}, exception happened: {exc}; returning None")
             return None
 
-    def _sensors_list(self, validity):
+    def _sensors_list(self, validity, lk_validity):
         """
         returns list of sensor data (data might be invalid depending on validity parameter)
         """
@@ -113,7 +113,7 @@ class SuezCoordinator(DataUpdateCoordinator):
             name=key,
             value=self._suez_value(self.suez, desc),
             unique_id=self.unique_id,
-            valid=validity,
+            valid=lk_validity if key == 'last_known' else validity,
             state_class=desc['state_class'],
             attribution=self.suez.attribution
         ) for (key, desc) in suez_attributes_map.items()]
@@ -147,7 +147,7 @@ class SuezCoordinator(DataUpdateCoordinator):
 
             await self.suez.update_async()
 
-            sensors = self._sensors_list(self.suez.uptodate)
+            sensors = self._sensors_list(self.suez.uptodate, self.suez.lk_uptodate)
             if not self.suez.uptodate:
                 raise SuezError(f"not updated -- will fetch later")
 

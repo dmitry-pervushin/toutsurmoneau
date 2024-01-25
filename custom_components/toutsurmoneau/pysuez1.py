@@ -74,7 +74,9 @@ class SuezClient():
 
         self.success = False
         self.uptodate = False
+        self.lk_uptodate = False
         self.attribution = None
+        self.last_known = None
         self.last = None
         self.this_month = None
         self.prev_month = None
@@ -211,9 +213,7 @@ class SuezClient():
         candidate = None
         count = 0
         while (last_known_good is None or last_known_good < 0.0001) and count < 60:
-            if _year_month != f"{now.year}/{now.month}":
-                 _year_month = f"{now.year}/{now.month}"
-                 candidate = await self._fetch_data_url(f"{_year_month}/{self._counter_id}")
+            candidate = await self._fetch_cached(now)
             if candidate is not None:
                  date_txt, delta, total = candidate[now.day - 1]
                  last_known_good = total
@@ -221,6 +221,21 @@ class SuezClient():
             now = now - datetime.timedelta(days=1)
             count = count + 1
         return last_known_good
+
+    def _fetch_clear_cached(self):
+       self._cached_data = {}
+
+    async def _fetch_cached(self, date):
+       _year_month = f"{date.year}/{date.month}"
+       if _year_month not in self._cached_data.keys() or self._cached_data[_year_month] is None:
+           self._logger.debug(f"Fetching data for {date.year}/{date.month}")
+           try:
+               self._cached_data[_year_month] = await self._fetch_data_url(f"{_year_month}/{self._counter_id}")
+           except:
+               return None
+       else:
+           self._logger.debug(f"Data for {date.year}/{date.month} is already here")
+       return self._cached_data[_year_month]
 
     async def _fetch_data(self):
         """
@@ -235,11 +250,14 @@ class SuezClient():
         if self._counter_id is None:
             self._counter_id = await self._fetch_consumption()
 
-        # get the current time in France: data on the website is updated in this timezone
+        self._fetch_clear_cached()
 
+        # get the current time in France: data on the website is updated in this timezone
         now = datetime.datetime.now(pytz.timezone('Europe/Paris'))
+
         try:
             self.last_known = await self._fetch_last_known(now)
+            self.lk_uptodate = True
         except SuezError as exc:
             self.last_known = 0
 
@@ -247,16 +265,13 @@ class SuezClient():
         first_this_month = now.replace(day=1)
         prev_month = first_this_month - datetime.timedelta(days=1)
 
-        try:
-            today_json = await self._fetch_data_url(f"{now.year}/{now.month}/{self._counter_id}")
-        except SuezError as exc:
-            today_json = {}
-            self._logger.warning(f"Fetching todaty's data: {exc}")
-        if yesterday.month != now.month:
-            yesterday_json = await self._fetch_data_url(f"{yesterday.year}/{yesterday.month}/{self._counter_id}")
-        else:
-            yesterday_json = today_json
-        prev_month_json = await self._fetch_data_url(f"{prev_month.year}/{prev_month.month}/{self._counter_id}")
+        today_json = await self._fetch_cached(now)
+        if today_json is None: today_json = {}
+
+        yesterday_json = await self._fetch_cached(yesterday)
+        if yesterday_json is None: yesterday_json = {}
+
+        prev_month_json = await self._fetch_cached(prev_month)
         history_json = await self._fetch_data_url(f'{self._counter_id}', endpoint=self.API_ENDPOINT_HISTORY)
 
         try:
