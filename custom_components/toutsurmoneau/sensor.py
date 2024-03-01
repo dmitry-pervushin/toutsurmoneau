@@ -52,6 +52,7 @@ class SuezSensorData:
 suez_attributes_map = OrderedDict([
     ('yesterday_delta'      , {'attr': 'last', 'index': 0, 'state_class': None}),
     ('yesterday_total'      , {'attr': 'last', 'index': 1, 'state_class' : SensorStateClass.TOTAL}),
+    ('last_known'           , {'attr': 'last_known', 'index': None, 'state_class' : SensorStateClass.TOTAL}),
     ('last_year_delta'      , {'attr': 'last_year_overall', 'index': None, 'state_class': None}),
     ('this_year_delta'      , {'attr': 'this_year_overall', 'index': None, 'state_class': None}),
     ('highest_monthly_delta', {'attr': 'highest_monthly', 'index': None, 'state_class': None}),
@@ -86,7 +87,7 @@ class SuezCoordinator(DataUpdateCoordinator):
             counter_id=info['counter_id'],
             provider=info['provider'],
             logger=_LOGGER)
-        self.sensors = self._sensors_list(False)
+        self.sensors = self._sensors_list(False, False)
         # skip first update to speed up things
         # the data will be retrieved on next poll
         self._skip_update = True
@@ -104,7 +105,7 @@ class SuezCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"On {desc['attr']}, exception happened: {exc}; returning None")
             return None
 
-    def _sensors_list(self, validity):
+    def _sensors_list(self, validity, lk_validity):
         """
         returns list of sensor data (data might be invalid depending on validity parameter)
         """
@@ -112,7 +113,7 @@ class SuezCoordinator(DataUpdateCoordinator):
             name=key,
             value=self._suez_value(self.suez, desc),
             unique_id=self.unique_id,
-            valid=validity,
+            valid=lk_validity if key == 'last_known' else validity,
             state_class=desc['state_class'],
             attribution=self.suez.attribution
         ) for (key, desc) in suez_attributes_map.items()]
@@ -146,16 +147,16 @@ class SuezCoordinator(DataUpdateCoordinator):
 
             await self.suez.update_async()
 
-            sensors = self._sensors_list(self.suez.uptodate)
+            sensors = self._sensors_list(self.suez.uptodate, self.suez.lk_uptodate)
             if not self.suez.uptodate:
-                raise SuezError(f"got some bad data, will fetch later")
+                raise SuezError(f"not updated -- will fetch later")
 
             self.last_update = self._now()
             self.sensors = sensors
             _LOGGER.debug(f"Update successful, next update is for tomorrow")
 
         except SuezError as exc:
-            _LOGGER.error(f"{exc} -- will not update")
+            _LOGGER.info(f"{exc} -- will not update")
 
         except Exception as exc:
             raise
